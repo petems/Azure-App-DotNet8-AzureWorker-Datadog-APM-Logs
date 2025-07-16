@@ -2,7 +2,12 @@
   "IsEncrypted": false,
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
-    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated"
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "DD_ENV": "development",
+    "DD_SERVICE": "azure-functions-sample",
+    "DD_VERSION": "1.0.0",
+    "DD_TRACE_ENABLED": "true",
+    "DD_RUNTIME_METRICS_ENABLED": "true"
   },
   "Logging": {
     "LogLevel": {

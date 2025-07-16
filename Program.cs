@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using System.Linq;
 using Serilog;
 using Serilog.Formatting.Compact;
+using Datadog.Trace; // Added for trace correlation
 
 var host = new HostBuilder()
   .ConfigureFunctionsWorkerDefaults()
@@ -25,9 +26,11 @@ var host = new HostBuilder()
       // Clear all default providers to prevent double logging
       logging.ClearProviders();
       
-      // Configure Serilog as the primary logger
+      // Configure Serilog as the primary logger with manual Datadog trace correlation
+      // https://docs.datadoghq.com/tracing/other_telemetry/connect_logs_and_traces/dotnet/?tab=microsoftextensionslogging#manual-injection
       var serilogLogger = new LoggerConfiguration()
           .MinimumLevel.Information()
+          .Enrich.FromLogContext()
           .WriteTo.Console()
           .WriteTo.File(
               new CompactJsonFormatter(), 
@@ -38,6 +41,12 @@ var host = new HostBuilder()
           .CreateLogger();
       
       logging.AddSerilog(serilogLogger);
+      
+      // Enable scopes - REQUIRED for Datadog correlation identifier injection
+      logging.AddSimpleConsole(options => 
+      {
+          options.IncludeScopes = true;
+      });
       
       // Set minimum log level
       logging.SetMinimumLevel(LogLevel.Information);
