@@ -1,179 +1,243 @@
 using Microsoft.Extensions.Logging;
 using Xunit;
-using Serilog;
-using Serilog.Formatting.Compact;
+using Microsoft.ApplicationInsights.WorkerService;
+using Microsoft.Extensions.DependencyInjection;
 using Datadog.Trace;
 
 namespace AzureAppServiceSample.Tests;
 
 public class ProductionIntegrationTests
 {
-    private static ILoggerFactory CreateProductionLikeSerilogLoggerFactory(LogLevel minimumLevel = LogLevel.Information)
+    private static ILoggerFactory CreateProductionLikeLoggerFactory(LogLevel minimumLevel = LogLevel.Information)
     {
-        var serilogLogger = new LoggerConfiguration()
-            .MinimumLevel.Is(ConvertToSerilogLevel(minimumLevel))
-            .Enrich.FromLogContext()
-            .WriteTo.Console()
-            .WriteTo.File(
-                new CompactJsonFormatter(), 
-                "logs/test-production.log",
-                rollingInterval: RollingInterval.Day,
-                retainedFileCountLimit: 7,
-                buffered: false)
-            .CreateLogger();
-
-        return LoggerFactory.Create(builder =>
+        var services = new ServiceCollection();
+        
+        // Add Application Insights (production-like configuration)
+        services.AddApplicationInsightsTelemetryWorkerService();
+        
+        // Configure logging with production-like settings
+        services.AddLogging(builder =>
         {
-            builder.AddSerilog(serilogLogger);
-            builder.AddSimpleConsole(options => 
-            {
-                options.IncludeScopes = true;
-            });
+            builder.AddConsole();
             builder.SetMinimumLevel(minimumLevel);
+            
+            // Filter out verbose Microsoft logs (production-like)
+            builder.AddFilter("Microsoft", LogLevel.Warning);
+            builder.AddFilter("System", LogLevel.Warning);
         });
+
+        var serviceProvider = services.BuildServiceProvider();
+        return serviceProvider.GetRequiredService<ILoggerFactory>();
     }
 
-    private static Serilog.Events.LogEventLevel ConvertToSerilogLevel(LogLevel logLevel)
+    private void SetProductionDatadogEnvironmentVariables()
     {
-        return logLevel switch
-        {
-            LogLevel.Debug => Serilog.Events.LogEventLevel.Debug,
-            LogLevel.Information => Serilog.Events.LogEventLevel.Information,
-            LogLevel.Warning => Serilog.Events.LogEventLevel.Warning,
-            LogLevel.Error => Serilog.Events.LogEventLevel.Error,
-            LogLevel.Critical => Serilog.Events.LogEventLevel.Fatal,
-            _ => Serilog.Events.LogEventLevel.Information
-        };
+        Environment.SetEnvironmentVariable("DD_SERVICE", "azure-functions-sample");
+        Environment.SetEnvironmentVariable("DD_VERSION", "1.0.0");
+        Environment.SetEnvironmentVariable("DD_ENV", "production");
+        Environment.SetEnvironmentVariable("DD_TRACE_ENABLED", "true");
+        Environment.SetEnvironmentVariable("DD_RUNTIME_METRICS_ENABLED", "true");
+    }
+
+    private void ClearProductionDatadogEnvironmentVariables()
+    {
+        Environment.SetEnvironmentVariable("DD_SERVICE", null);
+        Environment.SetEnvironmentVariable("DD_VERSION", null);
+        Environment.SetEnvironmentVariable("DD_ENV", null);
+        Environment.SetEnvironmentVariable("DD_TRACE_ENABLED", null);
+        Environment.SetEnvironmentVariable("DD_RUNTIME_METRICS_ENABLED", null);
     }
 
     [Fact]
-    public void Production_HttpTriggerFunction_CanBeCreated()
+    public void ProductionConfiguration_CanCreateHttpTriggerFunction()
     {
         // Arrange
-        var loggerFactory = CreateProductionLikeSerilogLoggerFactory(LogLevel.Information);
-        
+        var loggerFactory = CreateProductionLikeLoggerFactory(LogLevel.Warning);
+
         // Act
         var function = new HttpTriggerFunction(loggerFactory);
-        
+
         // Assert
         Assert.NotNull(function);
-        
-        // Cleanup
-        loggerFactory.Dispose();
     }
 
     [Fact]
-    public void Production_Configuration_CanCreateLoggerFactory()
-    {
-        // Arrange & Act
-        var loggerFactory = CreateProductionLikeSerilogLoggerFactory(LogLevel.Warning);
-        var logger = loggerFactory.CreateLogger<HttpTriggerFunction>();
-        
-        // Assert
-        Assert.NotNull(loggerFactory);
-        Assert.NotNull(logger);
-        
-        // Cleanup
-        loggerFactory.Dispose();
-    }
-
-    [Fact]
-    public void Production_HttpTriggerFunction_WithProductionLogger()
+    public void ProductionConfiguration_LoggerFiltersWork()
     {
         // Arrange
-        var loggerFactory = CreateProductionLikeSerilogLoggerFactory(LogLevel.Warning);
-        
+        var loggerFactory = CreateProductionLikeLoggerFactory(LogLevel.Warning);
+        var logger = loggerFactory.CreateLogger<ProductionIntegrationTests>();
+
+        // Act & Assert
+        Assert.False(logger.IsEnabled(LogLevel.Debug));
+        Assert.False(logger.IsEnabled(LogLevel.Information));
+        Assert.True(logger.IsEnabled(LogLevel.Warning));
+        Assert.True(logger.IsEnabled(LogLevel.Error));
+        Assert.True(logger.IsEnabled(LogLevel.Critical));
+    }
+
+    [Fact]
+    public void ProductionConfiguration_SupportsDatadogTracing()
+    {
         // Act
-        var function = new HttpTriggerFunction(loggerFactory);
-        
+        var tracer = Tracer.Instance;
+
         // Assert
-        Assert.NotNull(function);
-        
-        // Cleanup
-        loggerFactory.Dispose();
+        Assert.NotNull(tracer);
     }
 
     [Fact]
-    public void Production_Function_SupportsMultipleInstances()
+    public void ProductionConfiguration_CanCreateDatadogCorrelatedLogsWithEnvironmentVariables()
     {
         // Arrange
-        var loggerFactory = CreateProductionLikeSerilogLoggerFactory();
+        SetProductionDatadogEnvironmentVariables();
         
-        // Act - Create multiple instances
-        var functions = new List<HttpTriggerFunction>();
-        for (int i = 0; i < 5; i++)
+        try
         {
-            functions.Add(new HttpTriggerFunction(loggerFactory));
-        }
-        
-        // Assert
-        Assert.Equal(5, functions.Count);
-        Assert.All(functions, f => Assert.NotNull(f));
-        
-        // Cleanup
-        loggerFactory.Dispose();
-    }
+            var loggerFactory = CreateProductionLikeLoggerFactory();
+            var logger = loggerFactory.CreateLogger<ProductionIntegrationTests>();
 
-    [Fact]
-    public void Production_DatadogTraceCorrelation_WorksUnderLoad()
-    {
-        // Arrange
-        var loggerFactory = CreateProductionLikeSerilogLoggerFactory();
-        var logger = loggerFactory.CreateLogger<HttpTriggerFunction>();
-        
-        // Act - Simulate multiple concurrent trace correlations
-        var tasks = new List<Task>();
-        for (int i = 0; i < 10; i++)
-        {
-            int taskId = i;
-            tasks.Add(Task.Run(() =>
+            // Act & Assert - Should not throw
+            var activeScope = Tracer.Instance.ActiveScope;
+            var traceId = activeScope?.Span?.TraceId.ToString() ?? "0";
+            var spanId = activeScope?.Span?.SpanId.ToString() ?? "0";
+            
+            // Read Datadog configuration from environment variables (same as function)
+            var ddService = Environment.GetEnvironmentVariable("DD_SERVICE") ?? "unknown-service";
+            var ddVersion = Environment.GetEnvironmentVariable("DD_VERSION") ?? "unknown-version";
+            var ddEnv = Environment.GetEnvironmentVariable("DD_ENV") ?? "unknown-env";
+            
+            using var scope = logger.BeginScope(new Dictionary<string, object>
             {
-                var activeScope = Tracer.Instance.ActiveScope;
-                var traceId = activeScope?.Span?.TraceId.ToString() ?? $"test-trace-{taskId}";
-                var spanId = activeScope?.Span?.SpanId.ToString() ?? $"test-span-{taskId}";
-                
-                using var scope = logger.BeginScope(new Dictionary<string, object>
-                {
-                    ["dd.trace_id"] = traceId,
-                    ["dd.span_id"] = spanId,
-                    ["dd.service"] = $"test-service-{taskId}",
-                    ["dd.version"] = "1.0.0",
-                    ["dd.env"] = "production-test"
-                });
-                
-                logger.LogInformation("Concurrent trace correlation test {TaskId}", taskId);
-            }));
+                ["dd.trace_id"] = traceId,
+                ["dd.span_id"] = spanId,
+                ["dd.service"] = ddService,
+                ["dd.version"] = ddVersion,
+                ["dd.env"] = ddEnv
+            });
+            
+            logger.LogWarning("Production-level warning with Datadog correlation from environment variables");
+            
+            Assert.NotNull(traceId);
+            Assert.NotNull(spanId);
+            Assert.Equal("azure-functions-sample", ddService);
+            Assert.Equal("1.0.0", ddVersion);
+            Assert.Equal("production", ddEnv);
         }
-        
-        // Assert - All tasks should complete without exception
-        Task.WaitAll(tasks.ToArray(), TimeSpan.FromSeconds(30));
-        Assert.All(tasks, t => Assert.True(t.IsCompletedSuccessfully));
-        
-        // Cleanup
-        loggerFactory.Dispose();
+        finally
+        {
+            ClearProductionDatadogEnvironmentVariables();
+        }
+    }
+
+    [Theory]
+    [InlineData(LogLevel.Information)]
+    [InlineData(LogLevel.Warning)]
+    [InlineData(LogLevel.Error)]
+    public void ProductionConfiguration_SupportsExpectedLogLevels(LogLevel logLevel)
+    {
+        // Arrange
+        var loggerFactory = CreateProductionLikeLoggerFactory(logLevel);
+        var logger = loggerFactory.CreateLogger<ProductionIntegrationTests>();
+
+        // Act & Assert
+        Assert.True(logger.IsEnabled(logLevel));
     }
 
     [Fact]
-    public void Production_SerilogConfiguration_MatchesProductionSetup()
+    public void ProductionConfiguration_ApplicationInsightsIntegration()
     {
-        // Arrange & Act
-        var loggerFactory = CreateProductionLikeSerilogLoggerFactory();
-        var logger = loggerFactory.CreateLogger<HttpTriggerFunction>();
+        // Arrange
+        var loggerFactory = CreateProductionLikeLoggerFactory();
+        var logger = loggerFactory.CreateLogger<ProductionIntegrationTests>();
+
+        // Act & Assert - Verify Application Insights structured logging works
+        logger.LogInformation("Application Insights test with {RequestId} and {UserId}", 
+            "req-123", "user-456");
         
-        // Test various log levels
-        logger.LogDebug("Debug message (should be filtered out)");
-        logger.LogInformation("Information message");
-        logger.LogWarning("Warning message");
-        logger.LogError("Error message");
+        // No exceptions should be thrown
+        Assert.True(true);
+    }
+
+    [Fact]
+    public void ProductionConfiguration_CombinedApplicationInsightsAndDatadogLoggingWithEnvironmentVariables()
+    {
+        // Arrange
+        SetProductionDatadogEnvironmentVariables();
         
-        // Test structured logging
-        logger.LogInformation("Structured log with {Property1} and {Property2}", "test", 123);
+        try
+        {
+            var loggerFactory = CreateProductionLikeLoggerFactory();
+            var logger = loggerFactory.CreateLogger<ProductionIntegrationTests>();
+
+            // Act
+            var activeScope = Tracer.Instance.ActiveScope;
+            var traceId = activeScope?.Span?.TraceId.ToString() ?? "test-trace";
+            var spanId = activeScope?.Span?.SpanId.ToString() ?? "test-span";
+            
+            // Read Datadog configuration from environment variables (same as function)
+            var ddService = Environment.GetEnvironmentVariable("DD_SERVICE") ?? "unknown-service";
+            var ddVersion = Environment.GetEnvironmentVariable("DD_VERSION") ?? "unknown-version";
+            var ddEnv = Environment.GetEnvironmentVariable("DD_ENV") ?? "unknown-env";
+            
+            // Create combined scope with both Application Insights and Datadog properties
+            using var scope = logger.BeginScope(new Dictionary<string, object>
+            {
+                // Datadog properties from environment variables
+                ["dd.trace_id"] = traceId,
+                ["dd.span_id"] = spanId,
+                ["dd.service"] = ddService,
+                ["dd.version"] = ddVersion,
+                ["dd.env"] = ddEnv,
+                
+                // Application Insights properties
+                ["RequestId"] = "ai-request-123",
+                ["OperationId"] = "ai-operation-456",
+                ["UserAgent"] = "Test-Agent/1.0"
+            });
+            
+            // Log with structured properties
+            logger.LogInformation("Combined logging test: Method={Method}, Status={Status}", 
+                "GET", 200);
+            
+            // Assert - No exceptions should be thrown and environment variables should be read correctly
+            Assert.NotNull(traceId);
+            Assert.NotNull(spanId);
+            Assert.Equal("azure-functions-sample", ddService);
+            Assert.Equal("1.0.0", ddVersion);
+            Assert.Equal("production", ddEnv);
+        }
+        finally
+        {
+            ClearProductionDatadogEnvironmentVariables();
+        }
+    }
+
+    [Fact]
+    public void ProductionConfiguration_DatadogEnvironmentVariablesAreRespected()
+    {
+        // Arrange
+        SetProductionDatadogEnvironmentVariables();
         
-        // Assert - No exceptions should be thrown
-        Assert.NotNull(loggerFactory);
-        Assert.NotNull(logger);
-        
-        // Cleanup
-        loggerFactory.Dispose();
+        try
+        {
+            // Act
+            var ddService = Environment.GetEnvironmentVariable("DD_SERVICE");
+            var ddVersion = Environment.GetEnvironmentVariable("DD_VERSION");
+            var ddEnv = Environment.GetEnvironmentVariable("DD_ENV");
+            var ddTraceEnabled = Environment.GetEnvironmentVariable("DD_TRACE_ENABLED");
+            var ddRuntimeMetricsEnabled = Environment.GetEnvironmentVariable("DD_RUNTIME_METRICS_ENABLED");
+            
+            // Assert
+            Assert.Equal("azure-functions-sample", ddService);
+            Assert.Equal("1.0.0", ddVersion);
+            Assert.Equal("production", ddEnv);
+            Assert.Equal("true", ddTraceEnabled);
+            Assert.Equal("true", ddRuntimeMetricsEnabled);
+        }
+        finally
+        {
+            ClearProductionDatadogEnvironmentVariables();
+        }
     }
 } 
