@@ -4,7 +4,7 @@ Azure Functions Worker (.NET 8) deployed to Azure App Service with integrated Da
 
 ## 🚀 Quick Deploy
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template)
+[![Open in Azure Cloud Shell](https://shell.azure.com/images/launchcloudshell.png)](https://shell.azure.com/bash?cloudshell_git_repo=https://github.com/petems/Azure-App-DotNet8-AzureWorker-Datadog-APM-Logs.git)
 
 **Deploy with Azure CLI:**
 ```bash
