@@ -7,11 +7,11 @@
     <OutputType>Exe</OutputType>
     <AzureFunctionsVersion>v4</AzureFunctionsVersion>
     <AssemblyTitle>Azure Functions Worker Sample</AssemblyTitle>
-    <AssemblyDescription>Sample Azure Functions Worker application with Serilog and Datadog integration</AssemblyDescription>
+    <AssemblyDescription>Sample Azure Functions Worker application with Application Insights and Datadog integration</AssemblyDescription>
     <AssemblyProduct>Azure Functions Worker Sample</AssemblyProduct>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <AssemblyFileVersion>1.0.0.0</AssemblyFileVersion>
-    <Description>Sample Azure Functions Worker application demonstrating Azure Functions deployment with Serilog logging and Datadog APM integration</Description>
+    <Description>Sample Azure Functions Worker application demonstrating Azure Functions deployment with Application Insights logging and Datadog APM integration</Description>
     <IsPackable>false</IsPackable>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <UserSecretsId>azure-functions-worker-sample</UserSecretsId>
@@ -22,12 +22,8 @@
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Sdk" Version="1.18.1" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http" Version="3.2.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="8.0.1" />
-    <PackageReference Include="Serilog" Version="4.1.0" />
-    <PackageReference Include="Serilog.Extensions.Hosting" Version="8.0.0" />
-    <PackageReference Include="Serilog.Extensions.Logging" Version="8.0.0" />
-    <PackageReference Include="Serilog.Formatting.Compact" Version="3.0.0" />
-    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
-    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Microsoft.Azure.Functions.Worker.ApplicationInsights" Version="1.4.0" />
+    <PackageReference Include="Microsoft.ApplicationInsights.WorkerService" Version="2.22.0" />
     <PackageReference Include="Datadog.Trace.Bundle" Version="3.20.1" />
   </ItemGroup>
 
